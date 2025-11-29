@@ -1,0 +1,7 @@
+Jetson --> iPhone 12 IP Address
+
+10.151.210.21
+
+
+Jetson --> Radiomaster Pocket Backpack Wifi IP Address
+10.0.0.101

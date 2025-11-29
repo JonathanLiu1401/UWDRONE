@@ -6,29 +6,33 @@ from pymavlink import mavutil
 # --- CONFIGURATION ---
 SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
-GCS_IP = '10.151.210.66'  # <--- UPDATE THIS TO YOUR LAPTOP IP
-GCS_PORT = 14550          # Port for QGroundControl
-CMD_PORT = 14551          # Port for Custom Commands
 
+# UPDATE THIS IP to match your Ground Station Laptop!
+GCS_IP = '10.151.210.66' 
+GCS_PORT = 14550
+CMD_PORT = 14551
+
+# --- CONSTANTS ---
+SAFE_SPEED = 0.1  # <--- CHANGED FROM 0.5 TO 0.1 m/s
+
+# --- SETUP ---
 print(f"Connecting to Pixhawk on {SERIAL_PORT}...")
 try:
     vehicle = mavutil.mavlink_connection(SERIAL_PORT, baud=BAUD_RATE, source_system=1)
 except Exception as e:
-    print(f"Error connecting: {e}")
+    print(f"Error connecting to vehicle: {e}")
     sys.exit(1)
 
 print(f"Opening UDP Bridge to {GCS_IP}:{GCS_PORT}...")
 gcs = mavutil.mavlink_connection(f'udpout:{GCS_IP}:{GCS_PORT}', source_system=1)
 
 print(f"Opening Command Listener on Port {CMD_PORT}...")
-# 'udpin' means we LISTEN for incoming packets on this port
 cmd_listener = mavutil.mavlink_connection(f'udpin:0.0.0.0:{CMD_PORT}', source_system=1)
 
 vehicle.wait_heartbeat()
-print(f"Connected! Mode: {vehicle.flightmode}")
+print(f"Vehicle Connected! Mode: {vehicle.flightmode}")
 
 # --- STATE VARIABLES ---
-# Default velocity: 0,0,0 (Hover)
 target_vx = 0
 target_vy = 0
 target_vz = 0
@@ -43,53 +47,51 @@ def send_velocity_command(vx, vy, vz):
         type_mask, 0, 0, 0, vx, vy, vz, 0, 0, 0, 0, 0
     )
 
-print("Bridge Active. Listening for QGC (14550) and Custom Commands (14551)...")
+print(f"Bridge Active. Speed Limit: {SAFE_SPEED} m/s")
 
 try:
     while True:
-        # 1. BRIDGE: Drone -> Laptop (Telemetry)
+        # 1. BRIDGE: Downlink
         msg = vehicle.recv_match(blocking=False)
         if msg:
             gcs.write(msg.get_msgbuf())
 
-        # 2. BRIDGE: Laptop -> Drone (QGC Commands like Arm/Disarm)
+        # 2. BRIDGE: Uplink
         gcs_msg = gcs.recv_match(blocking=False)
         if gcs_msg:
             vehicle.write(gcs_msg.get_msgbuf())
 
-        # 3. CUSTOM COMMAND LISTENER (Port 14551)
-        # We listen for COMMAND_LONG messages with ID 31010 (MAV_CMD_USER_1)
+        # 3. COMMAND LISTENER
         cmd_msg = cmd_listener.recv_match(blocking=False)
         if cmd_msg:
             if cmd_msg.get_type() == 'COMMAND_LONG' and cmd_msg.command == 31010:
-                # Parse the parameters sent from Laptop
                 action_id = int(cmd_msg.param1)
                 
-                if action_id == 0:   # STOP / HOVER
+                if action_id == 0:   # STOP
                     target_vx, target_vy, target_vz = 0, 0, 0
                     print("CMD: STOP")
                 elif action_id == 1: # NORTH
-                    target_vx, target_vy, target_vz = 0.5, 0, 0
+                    target_vx, target_vy, target_vz = SAFE_SPEED, 0, 0
                     print("CMD: NORTH")
                 elif action_id == 2: # SOUTH
-                    target_vx, target_vy, target_vz = -0.5, 0, 0
+                    target_vx, target_vy, target_vz = -SAFE_SPEED, 0, 0
                     print("CMD: SOUTH")
                 elif action_id == 3: # EAST
-                    target_vx, target_vy, target_vz = 0, 0.5, 0
+                    target_vx, target_vy, target_vz = 0, SAFE_SPEED, 0
                     print("CMD: EAST")
                 elif action_id == 4: # WEST
-                    target_vx, target_vy, target_vz = 0, -0.5, 0
+                    target_vx, target_vy, target_vz = 0, -SAFE_SPEED, 0
                     print("CMD: WEST")
 
-        # 4. EXECUTE AUTONOMY (10Hz Loop)
+        # 4. EXECUTE AUTONOMY
         current_time = time.time()
         if (current_time - last_velocity_time > VELOCITY_INTERVAL):
+            
             mode = vehicle.flightmode
             if mode == 'GUIDED' or mode == 'OFFBOARD': 
-                # Send whatever the current target velocity is
                 send_velocity_command(target_vx, target_vy, target_vz)
             else:
-                # Heartbeat for manual modes
+                # Heartbeat (0,0,0)
                 send_velocity_command(0, 0, 0)
             
             last_velocity_time = current_time
@@ -97,6 +99,7 @@ try:
         time.sleep(0.001)
 
 except KeyboardInterrupt:
+    print("\nStopping...")
     vehicle.close()
     gcs.close()
     cmd_listener.close()

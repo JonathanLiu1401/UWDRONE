@@ -8,7 +8,7 @@ SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
 
 # UPDATE THIS IP to match your Ground Station Laptop
-GCS_IP = '192.168.88.2' 
+GCS_IP = '10.151.210.66' 
 GCS_PORT = 14550
 
 # --- SETUP ---
@@ -29,10 +29,11 @@ print(f"Vehicle Connected! Mode: {vehicle.flightmode}")
 
 # --- VARIABLES ---
 last_velocity_time = 0
-VELOCITY_INTERVAL = 0.1 # 10Hz
+VELOCITY_INTERVAL = 0.1 # 10Hz (Required >2Hz for PX4 Offboard)
 
 def send_velocity_command(vx, vy, vz):
     # Bitmask to ignore Position/Accel, Enable Velocity + Yaw
+    # 0b110111000111 = 3527
     type_mask = int(0b110111000111)
     
     vehicle.mav.set_position_target_local_ned_send(
@@ -45,20 +46,19 @@ def send_velocity_command(vx, vy, vz):
         0, 0        # Yaw
     )
 
-print("Bridge Active. Waiting for GUIDED mode...")
+print("Bridge Active. Sending Heartbeat Setpoints (0,0,0)...")
+print("Switch to GUIDED (ArduPilot) or OFFBOARD (PX4) to engage Mission.")
 
 try:
     while True:
         # 1. DRONE -> GCS (Downlink)
         msg = vehicle.recv_match(blocking=False)
         if msg:
-            # FIX: Send the raw bytes buffer, not the object
             gcs.write(msg.get_msgbuf())
 
         # 2. GCS -> DRONE (Uplink)
         gcs_msg = gcs.recv_match(blocking=False)
         if gcs_msg:
-            # FIX: Send the raw bytes buffer here too
             vehicle.write(gcs_msg.get_msgbuf())
 
         # 3. AUTONOMY LOGIC
@@ -66,10 +66,17 @@ try:
         if (current_time - last_velocity_time > VELOCITY_INTERVAL):
             
             # Check Flight Mode
-            # Note: We rely on pymavlink's internal state tracking
-            if vehicle.flightmode == 'GUIDED': 
+            mode = vehicle.flightmode
+            
+            if mode == 'GUIDED' or mode == 'OFFBOARD': 
+                # --- ACTIVE MISSION ---
+                # Fly North at 0.5 m/s
                 send_velocity_command(0.5, 0, 0)
-                # print("Autonomy Active: Flying North", end='\r')
+            else:
+                # --- PASSIVE HEARTBEAT ---
+                # Send 0 velocity so PX4 sees the stream and allows the switch.
+                # The FC ignores this in Manual modes.
+                send_velocity_command(0, 0, 0)
             
             last_velocity_time = current_time
             

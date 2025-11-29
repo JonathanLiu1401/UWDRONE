@@ -2,6 +2,12 @@ Jetson --> iPhone 12 IP Address
 
 10.151.210.21
 
+Laptop --> iPhone 12 IP Address
+
+10.151.210.66
+
+For changing ip address (eg from CPE to laptop+hotspot):
+sed -i "s/OLD_IP/NEW_IP/g" jetson_bridge_mode.py
 
 Jetson --> Radiomaster Pocket Backpack Wifi IP Address
 10.0.0.101

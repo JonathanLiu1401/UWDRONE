@@ -1,2 +1,2 @@
-# ThrustStand
-Drone motor + propellor thrust stand using load cell and arduino uno
+# UWDRONES
+Multiple drone software code for jetson, pixhawk, and arduino based thrust stand
